@@ -21,7 +21,8 @@ Moving files with a GUI file manager has these problems:
 
 - 🗂️ **Hierarchical navigation** — drill down into folders or go back up, step by step
 - ⌨️ **Keyboard only** — no mouse needed, navigate with arrow keys
-- ↔️ **Move or Copy** — choose per file with a single keypress (`m` / `c`)
+- 📁 **Move or copy folders too** — Tab to select a folder itself, Enter to go inside
+- ↔️ **Move or Copy** — choose per file/folder with a single keypress (`m` / `c`)
 - 🔁 **Continuous operation** — move/copy multiple files in one session
 - 🇯🇵 **Japanese filename support** — handles spaces and multibyte characters
 - 📦 **Simple install** — single bash script, only dependency is `fzf`
@@ -90,11 +91,14 @@ mmv
 ```
 Launch mmv
     ↓
-[Source] Navigate from home directory to select a file
+[Source] Navigate from home directory
+         Enter  → go inside a folder
+         Tab    → select this folder itself as source
+         Arrow  → select a file as source
     ↓
 [m] Move  /  [c] Copy  /  [q] Cancel
     ↓
-[Destination] Navigate from home directory to select a folder
+[Destination] Navigate to select destination folder
     ↓
 Done → back to file selection (Esc to quit)
 ```
@@ -104,11 +108,12 @@ Done → back to file selection (Esc to quit)
 | Key | Action |
 |-----|--------|
 | `↑` `↓` | Move up and down |
-| `Enter` | Enter folder / select file / confirm destination |
-| `.. (上に戻る)` | Go up one level |
-| `ここに決定` | Set current folder as destination |
-| `m` | Move the selected file |
-| `c` | Copy the selected file |
+| `Enter` | Enter a folder / select a file / confirm destination |
+| `Tab` | Select this folder itself as move/copy source |
+| `⬆ .. (上に戻る)` | Go up one level |
+| `✅ ここに決定` | Set current folder as destination |
+| `m` | Move the selected file/folder |
+| `c` | Copy the selected file/folder |
 | `q` / `Esc` | Cancel and go back to file selection |
 
 ---
@@ -118,8 +123,22 @@ Done → back to file selection (Esc to quit)
 Moving files in the terminal requires typing full paths manually — tedious and error-prone.
 GUI file managers take up too much screen space and require dragging between overlapping windows.
 
-By combining `fzf` with hierarchical navigation, mmv lets you move or copy files intuitively
-with just a keyboard, in a single terminal window.
+By combining `fzf` with hierarchical navigation, mmv lets you move or copy files and folders
+intuitively with just a keyboard, in a single terminal window.
+
+---
+
+## Changelog
+
+### v1.1
+- Added folder move/copy support (Tab to select folder itself)
+- Emoji icons for clearer navigation display
+
+### v1.0
+- Initial release
+- Interactive file move/copy with fzf
+- Hierarchical navigation
+- Japanese filename support
 
 ---
 

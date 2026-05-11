@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # mmv - Magic Move/Copy
-# m: 移動 / c: コピー
+# Enter: フォルダに入る / Tab: このフォルダ自体を選択 / m: 移動 / c: コピー
 
 MARK_UP="__UP__"
 MARK_HERE="__HERE__"
@@ -15,97 +15,99 @@ navigate() {
         local items=()
 
         if [ "$mode" = "source" ]; then
-            local header="[移動/コピー元] $current_dir"
+            local header="[移動/コピー元] $current_dir  |  Enter:フォルダに入る  Tab:このフォルダを選択"
         else
             local header="[移動/コピー先] $current_dir"
         fi
 
-        [ "$current_dir" != "/" ] && items+=("${MARK_UP} .. (上に戻る)")
-        [ "$mode" = "dest" ]      && items+=("${MARK_HERE} ここに決定")
+        [ "$current_dir" != "/" ] && items+=("${MARK_UP}|⬆  .. (上に戻る)")
+        [ "$mode" = "dest" ]      && items+=("${MARK_HERE}|✅ ここに決定")
 
         while IFS= read -r d; do
-            items+=("${MARK_DIR} $(basename "$d")")
+            items+=("${MARK_DIR}|📁 $(basename "$d")")
         done < <(find "$current_dir" -maxdepth 1 -mindepth 1 -type d ! -name '.*' | sort)
 
         if [ "$mode" = "source" ]; then
             while IFS= read -r f; do
-                items+=("${MARK_FILE} $(basename "$f")")
+                items+=("${MARK_FILE}|📄 $(basename "$f")")
             done < <(find "$current_dir" -maxdepth 1 -mindepth 1 ! -type d ! -name '.*' | sort)
         fi
 
-        local choice
-        choice=$(printf '%s\n' "${items[@]}" | fzf \
-            --prompt="$([ "$mode" = "source" ] && echo "ファイル選択 > " || echo "移動/コピー先 > ")" \
-            --height=80% \
-            --border \
-            --header="$header")
+        # fzfの結果：通常選択かTabかを区別するため出力にプレフィックスをつける
+        local choice action
+        choice=$(printf '%s\n' "${items[@]}" | \
+            awk -F'|' '{print $2}' | \
+            fzf \
+                --prompt="$([ "$mode" = "source" ] && echo "ファイル選択 > " || echo "移動/コピー先 > ")" \
+                --height=80% \
+                --border \
+                --header="$header" \
+                --expect=tab)
 
         [ -z "$choice" ] && return 1
 
-        local tag name
-        tag=$(echo "$choice" | awk '{print $1}')
-        name=$(echo "$choice" | cut -d' ' -f2-)
+        # 1行目がキー、2行目が選択内容
+        action=$(echo "$choice" | head -1)
+        local selected
+        selected=$(echo "$choice" | tail -1)
 
-        case "$tag" in
-            "$MARK_UP")
-                current_dir="$(dirname "$current_dir")"
-                ;;
-            "$MARK_HERE")
-                echo "$current_dir"
+        [ -z "$selected" ] && return 1
+
+        local clean_name
+        clean_name=$(echo "$selected" | sed 's/^📁 //;s/^📄 //')
+
+        # Tabキー → フォルダ自体を選択（移動元モードのみ）
+        if [ "$action" = "tab" ] && [ "$mode" = "source" ]; then
+            if [ -d "$current_dir/$clean_name" ]; then
+                echo "$current_dir/$clean_name"
                 return 0
-                ;;
-            "$MARK_DIR")
-                current_dir="$current_dir/$name"
-                ;;
-            "$MARK_FILE")
-                echo "$current_dir/$name"
+            fi
+        fi
+
+        if [[ "$selected" == "⬆  .. (上に戻る)" ]]; then
+            current_dir="$(dirname "$current_dir")"
+
+        elif [[ "$selected" == "✅ ここに決定" ]]; then
+            echo "$current_dir"
+            return 0
+
+        else
+            if [ -d "$current_dir/$clean_name" ]; then
+                current_dir="$current_dir/$clean_name"
+            elif [ -f "$current_dir/$clean_name" ]; then
+                echo "$current_dir/$clean_name"
                 return 0
-                ;;
-        esac
+            fi
+        fi
     done
 }
 
 # メインループ
 while true; do
-    # Step1: ファイル選択
     SOURCE=$(navigate "source" "$HOME")
     [ $? -ne 0 ] && echo "終了します。" && break
     [ -z "$SOURCE" ] && continue
 
     FILENAME=$(basename "$SOURCE")
 
-    # Step2: 移動かコピーか選択
     echo ""
-    echo "  ファイル: $FILENAME"
+    echo "  対象: $FILENAME"
     echo "  ┌─────────────────────────┐"
     echo "  │  [m] 移動   [c] コピー  │"
-    echo "  │  [Esc/q] キャンセル     │"
+    echo "  │  [q] キャンセル         │"
     echo "  └─────────────────────────┘"
 
     while true; do
         read -rsn1 KEY
         case "$KEY" in
-            m|M)
-                ACTION="move"
-                echo "  → 移動"
-                break
-                ;;
-            c|C)
-                ACTION="copy"
-                echo "  → コピー"
-                break
-                ;;
-            q|$'\e')
-                ACTION="cancel"
-                echo "  → キャンセル"
-                break
-                ;;
+            m|M) ACTION="move"; echo "  → 移動"; break ;;
+            c|C) ACTION="copy"; echo "  → コピー"; break ;;
+            q|$'\e') ACTION="cancel"; echo "  → キャンセル"; break ;;
         esac
     done
 
     [ "$ACTION" = "cancel" ] && continue
 
-    # Step3: 移動/コピー先フォルダ選択
     DEST_DIR=$(navigate "dest" "$HOME")
     if [ $? -ne 0 ] || [ -z "$DEST_DIR" ]; then
         echo "キャンセル。最初からやり直します。"
@@ -119,12 +121,12 @@ while true; do
 
     if [ "$ACTION" = "move" ]; then
         mv -- "$SOURCE" "$DEST_PATH" \
-            && echo "✓ 移動完了: $FILENAME → $DEST_DIR" \
-            || echo "✗ エラー"
+            && echo "✅ 移動完了: $FILENAME → $DEST_DIR" \
+            || echo "❌ エラー"
     else
         cp -r -- "$SOURCE" "$DEST_PATH" \
-            && echo "✓ コピー完了: $FILENAME → $DEST_DIR" \
-            || echo "✗ エラー"
+            && echo "✅ コピー完了: $FILENAME → $DEST_DIR" \
+            || echo "❌ エラー"
     fi
 
 done
