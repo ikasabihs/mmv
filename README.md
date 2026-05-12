@@ -1,6 +1,6 @@
-# mmv - Magic Move/Copy
+# mmv - Magic Move/Copy/Delete/Rename
 
-A terminal-based interactive file mover and copier using `fzf` for hierarchical navigation.
+A terminal-based interactive file manager using `fzf` for hierarchical navigation.
 
 ---
 
@@ -21,8 +21,12 @@ Moving files with a GUI file manager has these problems:
 
 - 🗂️ **Hierarchical navigation** — drill down into folders or go back up, step by step
 - ⌨️ **Keyboard only** — no mouse needed, navigate with arrow keys
-- 📁 **Move or copy folders too** — Tab to select a folder itself, Enter to go inside
+- 📁 **Move or copy folders** — Tab to select a folder itself, Enter to go inside
+- ☑️ **Multi-file selection** — Space to select multiple files at once
 - ↔️ **Move or Copy** — choose per file/folder with a single keypress (`m` / `c`)
+- 🗑️ **Delete** — with confirmation prompt
+- ✏️ **Rename** — edit filename inline with current name pre-filled
+- ⚠️ **Overwrite protection** — prompts before overwriting existing files
 - 🔁 **Continuous operation** — move/copy multiple files in one session
 - 🇯🇵 **Japanese filename support** — handles spaces and multibyte characters
 - 📦 **Simple install** — single bash script, only dependency is `fzf`
@@ -86,35 +90,38 @@ sudo cp mmv /usr/local/bin/
 mmv
 ```
 
+### Controls
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` | Move up and down |
+| `Enter` | Enter a folder / select a file |
+| `Space` | Select multiple files (toggle) |
+| `Tab` | Select folder itself as source (not enter) |
+| `⬆ .. (上に戻る)` | Go up one level |
+| `✅ ここに決定` | Set current folder as destination |
+| `m` | Move selected file(s)/folder |
+| `c` | Copy selected file(s)/folder |
+| `d` | Delete selected file(s)/folder |
+| `r` | Rename (single selection only) |
+| `q` / `Esc` | Cancel / Quit |
+
 ### Flow
 
 ```
 Launch mmv
     ↓
 [Source] Navigate from home directory
-         Enter  → go inside a folder
-         Tab    → select this folder itself as source
-         Arrow  → select a file as source
+         Space  → select multiple files
+         Enter  → enter a folder / select a file
+         Tab    → select folder itself
     ↓
-[m] Move  /  [c] Copy  /  [q] Cancel
+[m] Move / [c] Copy / [d] Delete / [r] Rename / [q] Cancel
     ↓
 [Destination] Navigate to select destination folder
     ↓
 Done → back to file selection (Esc to quit)
 ```
-
-### Controls
-
-| Key | Action |
-|-----|--------|
-| `↑` `↓` | Move up and down |
-| `Enter` | Enter a folder / select a file / confirm destination |
-| `Tab` | Select this folder itself as move/copy source |
-| `⬆ .. (上に戻る)` | Go up one level |
-| `✅ ここに決定` | Set current folder as destination |
-| `m` | Move the selected file/folder |
-| `c` | Copy the selected file/folder |
-| `q` / `Esc` | Cancel and go back to file selection |
 
 ---
 
@@ -123,12 +130,18 @@ Done → back to file selection (Esc to quit)
 Moving files in the terminal requires typing full paths manually — tedious and error-prone.
 GUI file managers take up too much screen space and require dragging between overlapping windows.
 
-By combining `fzf` with hierarchical navigation, mmv lets you move or copy files and folders
-intuitively with just a keyboard, in a single terminal window.
+By combining `fzf` with hierarchical navigation, mmv lets you move, copy, delete, and rename
+files and folders intuitively with just a keyboard, in a single terminal window.
 
 ---
 
 ## Changelog
+
+### v1.2 (latest)
+- Added multi-file selection with Space key
+- Added rename function (`r`) with inline editing
+- Added delete function (`d`) with confirmation
+- Added overwrite protection for move and copy
 
 ### v1.1
 - Added folder move/copy support (Tab to select folder itself)
