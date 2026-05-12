@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# mmv - Magic Move/Copy
-# Enter: フォルダに入る / Tab: このフォルダ自体を選択 / m: 移動 / c: コピー
+# mmv - Magic Move/Copy/Delete/Rename v1.4
 
 MARK_UP="__UP__"
 MARK_HERE="__HERE__"
@@ -15,7 +14,8 @@ navigate() {
         local items=()
 
         if [ "$mode" = "source" ]; then
-            local header="[移動/コピー元] $current_dir  |  Enter:フォルダに入る  Tab:このフォルダを選択"
+            local header="[移動/コピー/削除元] $current_dir
+Space:複数選択  Enter:確定/フォルダに入る  Tab:フォルダ自体を選択"
         else
             local header="[移動/コピー先] $current_dir"
         fi
@@ -33,80 +33,192 @@ navigate() {
             done < <(find "$current_dir" -maxdepth 1 -mindepth 1 ! -type d ! -name '.*' | sort)
         fi
 
-        # fzfの結果：通常選択かTabかを区別するため出力にプレフィックスをつける
-        local choice action
+        local fzf_opts=(
+            --prompt="$([ "$mode" = "source" ] && echo "ファイル選択 > " || echo "移動/コピー先 > ")"
+            --height=80%
+            --border
+            --header="$header"
+            --expect=tab
+        )
+        [ "$mode" = "source" ] && fzf_opts+=(--multi)
+
+        local choice
         choice=$(printf '%s\n' "${items[@]}" | \
             awk -F'|' '{print $2}' | \
-            fzf \
-                --prompt="$([ "$mode" = "source" ] && echo "ファイル選択 > " || echo "移動/コピー先 > ")" \
-                --height=80% \
-                --border \
-                --header="$header" \
-                --expect=tab)
+            fzf "${fzf_opts[@]}")
 
         [ -z "$choice" ] && return 1
 
-        # 1行目がキー、2行目が選択内容
+        local action
         action=$(echo "$choice" | head -1)
-        local selected
-        selected=$(echo "$choice" | tail -1)
 
-        [ -z "$selected" ] && return 1
-
-        local clean_name
-        clean_name=$(echo "$selected" | sed 's/^📁 //;s/^📄 //')
-
-        # Tabキー → フォルダ自体を選択（移動元モードのみ）
         if [ "$action" = "tab" ] && [ "$mode" = "source" ]; then
+            local selected clean_name
+            selected=$(echo "$choice" | tail -1)
+            clean_name=$(echo "$selected" | sed 's/^📁 //;s/^📄 //')
             if [ -d "$current_dir/$clean_name" ]; then
                 echo "$current_dir/$clean_name"
                 return 0
             fi
+            continue
         fi
+
+        local lines
+        mapfile -t lines < <(echo "$choice" | tail -n +2)
+
+        if [ ${#lines[@]} -gt 1 ]; then
+            for line in "${lines[@]}"; do
+                [ -z "$line" ] && continue
+                local n
+                n=$(echo "$line" | sed 's/^📁 //;s/^📄 //')
+                echo "$current_dir/$n"
+            done
+            return 0
+        fi
+
+        local selected clean_name
+        selected="${lines[0]}"
+        [ -z "$selected" ] && return 1
+        clean_name=$(echo "$selected" | sed 's/^📁 //;s/^📄 //')
 
         if [[ "$selected" == "⬆  .. (上に戻る)" ]]; then
             current_dir="$(dirname "$current_dir")"
-
         elif [[ "$selected" == "✅ ここに決定" ]]; then
             echo "$current_dir"
             return 0
-
-        else
-            if [ -d "$current_dir/$clean_name" ]; then
-                current_dir="$current_dir/$clean_name"
-            elif [ -f "$current_dir/$clean_name" ]; then
-                echo "$current_dir/$clean_name"
-                return 0
-            fi
+        elif [ -d "$current_dir/$clean_name" ]; then
+            current_dir="$current_dir/$clean_name"
+        elif [ -f "$current_dir/$clean_name" ]; then
+            echo "$current_dir/$clean_name"
+            return 0
         fi
     done
 }
 
-# メインループ
-while true; do
-    SOURCE=$(navigate "source" "$HOME")
-    [ $? -ne 0 ] && echo "終了します。" && break
-    [ -z "$SOURCE" ] && continue
+do_move() {
+    local src="$1" dest="$2"
+    if [ -e "$dest" ]; then
+        echo "  ⚠️  $(basename "$dest") はすでに存在します"
+        read -rp "  上書きしますか? [y/N]: " OW
+        [[ "$OW" =~ ^[Yy]$ ]] || { echo "  キャンセル"; return 1; }
+    fi
+    mv -- "$src" "$dest" && echo "✅ 移動完了: $(basename "$src")" || echo "❌ エラー"
+}
 
-    FILENAME=$(basename "$SOURCE")
+do_copy() {
+    local src="$1" dest="$2"
+    if [ -e "$dest" ]; then
+        echo "  ⚠️  $(basename "$dest") はすでに存在します"
+        read -rp "  上書きしますか? [y/N]: " OW
+        [[ "$OW" =~ ^[Yy]$ ]] || { echo "  キャンセル"; return 1; }
+    fi
+    cp -r -- "$src" "$dest" && echo "✅ コピー完了: $(basename "$src")" || echo "❌ エラー"
+}
+
+do_delete() {
+    local src="$1"
+    if [ -d "$src" ]; then
+        echo "  🗑️  フォルダ: $(basename "$src")  ⚠️  中身ごと削除されます！"
+    else
+        echo "  🗑️  ファイル: $(basename "$src")"
+    fi
+    read -rp "  本当に削除しますか? [y/N]: " DEL
+    if [[ "$DEL" =~ ^[Yy]$ ]]; then
+        rm -rf -- "$src" && echo "✅ 削除完了: $(basename "$src")" || echo "❌ エラー"
+    else
+        echo "  キャンセル"
+    fi
+}
+
+do_rename() {
+    local src="$1"
+    local dir oldname
+    dir="$(dirname "$src")"
+    oldname="$(basename "$src")"
 
     echo ""
-    echo "  対象: $FILENAME"
-    echo "  ┌─────────────────────────┐"
-    echo "  │  [m] 移動   [c] コピー  │"
-    echo "  │  [q] キャンセル         │"
-    echo "  └─────────────────────────┘"
+    echo "  リネーム: $oldname"
+    echo "  新しい名前を入力してください（空Enterでキャンセル）:"
+    # fzfを使って入力を受け付ける
+    local NEWNAME
+    NEWNAME=$(echo "$oldname" | fzf \
+        --print-query \
+        --prompt="新しい名前 > " \
+        --height=10% \
+        --border \
+        --header="現在の名前: $oldname  |  編集してEnter / Escでキャンセル" \
+        --no-info \
+        --query="$oldname" | head -1)
+
+    if [ -z "$NEWNAME" ] || [ "$NEWNAME" = "$oldname" ]; then
+        echo "  キャンセル"
+        return
+    fi
+
+    local dest="$dir/$NEWNAME"
+    if [ -e "$dest" ]; then
+        echo "  ⚠️  $NEWNAME はすでに存在します"
+        read -rp "  上書きしますか? [y/N]: " OW
+        [[ "$OW" =~ ^[Yy]$ ]] || { echo "  キャンセル"; return; }
+    fi
+
+    mv -- "$src" "$dest" && echo "✅ リネーム完了: $oldname → $NEWNAME" || echo "❌ エラー"
+}
+
+# メインループ
+while true; do
+    mapfile -t SOURCES < <(navigate "source" "$HOME")
+
+    if [ ${#SOURCES[@]} -eq 0 ]; then
+        echo "終了します。"
+        break
+    fi
+
+    echo ""
+    if [ ${#SOURCES[@]} -eq 1 ]; then
+        echo "  対象: $(basename "${SOURCES[0]}")"
+    else
+        echo "  対象: ${#SOURCES[@]} 個のファイル/フォルダ"
+        for s in "${SOURCES[@]}"; do
+            echo "    - $(basename "$s")"
+        done
+    fi
+
+    echo "  ┌─────────────────────────────────────────┐"
+    echo "  │  [m] 移動  [c] コピー  [d] 削除        │"
+    echo "  │  [r] リネーム（1個選択時のみ）  [q] 終了│"
+    echo "  └─────────────────────────────────────────┘"
 
     while true; do
         read -rsn1 KEY
         case "$KEY" in
-            m|M) ACTION="move"; echo "  → 移動"; break ;;
-            c|C) ACTION="copy"; echo "  → コピー"; break ;;
+            m|M) ACTION="move";   echo "  → 移動";   break ;;
+            c|C) ACTION="copy";   echo "  → コピー"; break ;;
+            d|D) ACTION="delete"; echo "  → 削除";   break ;;
+            r|R)
+                if [ ${#SOURCES[@]} -eq 1 ]; then
+                    ACTION="rename"; echo "  → リネーム"; break
+                else
+                    echo "  リネームは1個ずつ選択してください"
+                fi
+                ;;
             q|$'\e') ACTION="cancel"; echo "  → キャンセル"; break ;;
         esac
     done
 
     [ "$ACTION" = "cancel" ] && continue
+
+    if [ "$ACTION" = "delete" ]; then
+        for src in "${SOURCES[@]}"; do
+            do_delete "$src"
+        done
+        continue
+    fi
+
+    if [ "$ACTION" = "rename" ]; then
+        do_rename "${SOURCES[0]}"
+        continue
+    fi
 
     DEST_DIR=$(navigate "dest" "$HOME")
     if [ $? -ne 0 ] || [ -z "$DEST_DIR" ]; then
@@ -114,19 +226,14 @@ while true; do
         continue
     fi
 
-    DEST_PATH="$DEST_DIR/$FILENAME"
-
-    echo "元: $SOURCE"
-    echo "先: $DEST_PATH"
-
-    if [ "$ACTION" = "move" ]; then
-        mv -- "$SOURCE" "$DEST_PATH" \
-            && echo "✅ 移動完了: $FILENAME → $DEST_DIR" \
-            || echo "❌ エラー"
-    else
-        cp -r -- "$SOURCE" "$DEST_PATH" \
-            && echo "✅ コピー完了: $FILENAME → $DEST_DIR" \
-            || echo "❌ エラー"
-    fi
+    for src in "${SOURCES[@]}"; do
+        FILENAME=$(basename "$src")
+        DEST_PATH="$DEST_DIR/$FILENAME"
+        if [ "$ACTION" = "move" ]; then
+            do_move "$src" "$DEST_PATH"
+        else
+            do_copy "$src" "$DEST_PATH"
+        fi
+    done
 
 done
