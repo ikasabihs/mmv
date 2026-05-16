@@ -1,11 +1,183 @@
 #!/usr/bin/env bash
-# mmv - Magic Move/Copy/Delete/Rename v1.4
+# mmv - Magic Move/Copy/Delete/Rename v1.3
+# ネットワークドライブ(SMB)対応版
 
 MARK_UP="__UP__"
 MARK_HERE="__HERE__"
 MARK_DIR="__DIR__"
 MARK_FILE="__FILE__"
+MARK_NET="__NET__"
 
+BOOKMARK_FILE="$HOME/.mmv_bookmarks"
+MOUNT_POINTS=()
+MOUNT_LABELS=()
+
+# 起動時に残った古いmmvマウントをクリーンアップ
+cleanup_stale_mounts() {
+    local base_dir="/mnt"
+    [[ "$OSTYPE" == "darwin"* ]] && base_dir="/Volumes"
+    for mp in "$base_dir"/mmv_*; do
+        [ -d "$mp" ] || continue
+        mountpoint -q "$mp" 2>/dev/null && sudo umount "$mp" 2>/dev/null
+        sudo rmdir "$mp" 2>/dev/null
+    done
+}
+cleanup_stale_mounts
+
+# -------------------------------------------------------
+# OS判定
+# -------------------------------------------------------
+detect_os() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "mac"
+    else
+        echo "linux"
+    fi
+}
+
+# -------------------------------------------------------
+# 1つの接続先をマウント
+# -------------------------------------------------------
+do_mount() {
+    local ip="$1" sharename="$2" username="$3" password="$4"
+    local os
+    os=$(detect_os)
+
+    local safe_name
+    safe_name=$(echo "${ip}_${sharename}" | tr '/' '_' | tr ' ' '_')
+
+    local mountpoint
+    if [ "$os" = "mac" ]; then
+        mountpoint="/Volumes/mmv_${safe_name}"
+    else
+        mountpoint="/mnt/mmv_${safe_name}"
+    fi
+
+    sudo mkdir -p "$mountpoint"
+    echo "  マウント中: //$ip/$sharename → $mountpoint"
+
+    if [ "$os" = "mac" ]; then
+        mount_smbfs "//$username:$password@$ip/$sharename" "$mountpoint"
+    else
+        sudo mount -t cifs "//$ip/$sharename" "$mountpoint" \
+            -o "username=$username,password=$password,uid=$(id -u),gid=$(id -g)"
+    fi
+
+    if [ $? -eq 0 ]; then
+        echo "  ✅ 接続成功: $sharename ($ip)"
+        MOUNT_POINTS+=("$mountpoint")
+        MOUNT_LABELS+=("🌐 $sharename ($ip)")
+        return 0
+    else
+        echo "  ❌ 接続失敗: $sharename ($ip)"
+        sudo rmdir "$mountpoint" 2>/dev/null
+        return 1
+    fi
+}
+
+# -------------------------------------------------------
+# SMBマウント（複数選択対応）
+# -------------------------------------------------------
+mount_smb() {
+    echo ""
+    echo "  ================================================"
+    echo "  ネットワークドライブ接続"
+    echo "  ================================================"
+
+    while true; do
+        echo ""
+        echo "  [b] ブックマークから選ぶ"
+        echo "  [n] 新規接続先を入力"
+        echo "  [d] 接続済み一覧を確認"
+        echo "  [q] 接続完了して進む"
+        echo ""
+
+        read -rsn1 NET_KEY
+        case "$NET_KEY" in
+            b|B)
+                if [ ! -f "$BOOKMARK_FILE" ] || [ ! -s "$BOOKMARK_FILE" ]; then
+                    echo "  保存済み接続先がありません"
+                    continue
+                fi
+
+                # 複数選択でブックマークから選ぶ
+                local selected_bookmarks
+                mapfile -t selected_bookmarks < <(cat "$BOOKMARK_FILE" | \
+                    fzf --multi \
+                        --prompt="接続先を選ぶ（Space:複数選択 Enter:確定） > " \
+                        --height=50% \
+                        --border \
+                        --header="Space:複数選択  Enter:確定  Esc:キャンセル")
+
+                for bookmark in "${selected_bookmarks[@]}"; do
+                    local ip sharename username password
+                    ip=$(echo "$bookmark" | cut -d'|' -f1)
+                    sharename=$(echo "$bookmark" | cut -d'|' -f2)
+                    username=$(echo "$bookmark" | cut -d'|' -f3)
+                    read -rsp "  パスワード ($username@$ip): " password
+                    echo ""
+                    do_mount "$ip" "$sharename" "$username" "$password"
+                done
+                ;;
+
+            n|N)
+                local ip sharename username password
+                read -rp "  IPアドレス: " ip
+                read -rp "  共有フォルダ名: " sharename
+                read -rp "  ユーザー名: " username
+                read -rsp "  パスワード: " password
+                echo ""
+
+                [ -z "$ip" ] || [ -z "$sharename" ] || [ -z "$username" ] && echo "  キャンセル" && continue
+
+                read -rp "  この接続先を保存しますか? [y/N]: " SAVE
+                if [[ "$SAVE" =~ ^[Yy]$ ]]; then
+                    if ! grep -q "^$ip|$sharename|$username$" "$BOOKMARK_FILE" 2>/dev/null; then
+                        echo "$ip|$sharename|$username" >> "$BOOKMARK_FILE"
+                        echo "  ✅ 保存しました"
+                    else
+                        echo "  すでに保存済みです"
+                    fi
+                fi
+
+                do_mount "$ip" "$sharename" "$username" "$password"
+                ;;
+
+            d|D)
+                if [ ${#MOUNT_POINTS[@]} -eq 0 ]; then
+                    echo "  接続済みのドライブはありません"
+                else
+                    echo "  接続済みドライブ:"
+                    for label in "${MOUNT_LABELS[@]}"; do
+                        echo "    $label"
+                    done
+                fi
+                ;;
+
+            q|Q)
+                break
+                ;;
+        esac
+    done
+}
+
+# -------------------------------------------------------
+# 終了時アンマウント
+# -------------------------------------------------------
+cleanup_mounts() {
+    for mp in "${MOUNT_POINTS[@]}"; do
+        if mountpoint -q "$mp" 2>/dev/null; then
+            echo "アンマウント中: $mp"
+            sudo umount "$mp" 2>/dev/null
+            sudo rmdir "$mp" 2>/dev/null
+        fi
+    done
+}
+trap cleanup_mounts EXIT
+
+# -------------------------------------------------------
+# ナビゲーション
+# -------------------------------------------------------
 navigate() {
     local mode="$1"
     local current_dir="${2:-$HOME}"
@@ -21,7 +193,14 @@ Space:複数選択  Enter:確定/フォルダに入る  Tab:フォルダ自体�
         fi
 
         [ "$current_dir" != "/" ] && items+=("${MARK_UP}|⬆  .. (上に戻る)")
-        [ "$mode" = "dest" ]      && items+=("${MARK_HERE}|✅ ここに決定")
+        [ "$mode" = "dest" ] && items+=("${MARK_HERE}|✅ ここに決定")
+
+        # ネットワークドライブをトップに表示
+        if [ ${#MOUNT_POINTS[@]} -gt 0 ]; then
+            for i in "${!MOUNT_POINTS[@]}"; do
+                items+=("${MARK_NET}|${MOUNT_LABELS[$i]}")
+            done
+        fi
 
         while IFS= read -r d; do
             items+=("${MARK_DIR}|📁 $(basename "$d")")
@@ -55,7 +234,7 @@ Space:複数選択  Enter:確定/フォルダに入る  Tab:フォルダ自体�
         if [ "$action" = "tab" ] && [ "$mode" = "source" ]; then
             local selected clean_name
             selected=$(echo "$choice" | tail -1)
-            clean_name=$(echo "$selected" | sed 's/^📁 //;s/^📄 //')
+            clean_name=$(echo "$selected" | sed 's/^📁 //;s/^📄 //;s/^🌐 //')
             if [ -d "$current_dir/$clean_name" ]; then
                 echo "$current_dir/$clean_name"
                 return 0
@@ -79,6 +258,19 @@ Space:複数選択  Enter:確定/フォルダに入る  Tab:フォルダ自体�
         local selected clean_name
         selected="${lines[0]}"
         [ -z "$selected" ] && return 1
+
+        # ネットワークドライブが選ばれた場合
+        if [[ "$selected" == "🌐 "* ]]; then
+            local label="${selected#🌐 }"
+            for i in "${!MOUNT_LABELS[@]}"; do
+                if [ "${MOUNT_LABELS[$i]}" = "🌐 $label" ]; then
+                    current_dir="${MOUNT_POINTS[$i]}"
+                    break
+                fi
+            done
+            continue
+        fi
+
         clean_name=$(echo "$selected" | sed 's/^📁 //;s/^📄 //')
 
         if [[ "$selected" == "⬆  .. (上に戻る)" ]]; then
@@ -95,6 +287,9 @@ Space:複数選択  Enter:確定/フォルダに入る  Tab:フォルダ自体�
     done
 }
 
+# -------------------------------------------------------
+# ファイル操作関数
+# -------------------------------------------------------
 do_move() {
     local src="$1" dest="$2"
     if [ -e "$dest" ]; then
@@ -138,8 +333,6 @@ do_rename() {
 
     echo ""
     echo "  リネーム: $oldname"
-    echo "  新しい名前を入力してください（空Enterでキャンセル）:"
-    # fzfを使って入力を受け付ける
     local NEWNAME
     NEWNAME=$(echo "$oldname" | fzf \
         --print-query \
@@ -165,7 +358,30 @@ do_rename() {
     mv -- "$src" "$dest" && echo "✅ リネーム完了: $oldname → $NEWNAME" || echo "❌ エラー"
 }
 
+# -------------------------------------------------------
+# 起動時メニュー
+# -------------------------------------------------------
+echo ""
+echo "  ================================================"
+echo "  mmv - Magic Move/Copy/Delete/Rename"
+echo "  ================================================"
+echo "  [n] ネットワークドライブに接続"
+echo "  [s] そのまま開始"
+echo "  [q] 終了"
+echo ""
+
+while true; do
+    read -rsn1 START_KEY
+    case "$START_KEY" in
+        n|N) mount_smb; break ;;
+        s|S) break ;;
+        q|Q) echo "終了します。"; exit 0 ;;
+    esac
+done
+
+# -------------------------------------------------------
 # メインループ
+# -------------------------------------------------------
 while true; do
     mapfile -t SOURCES < <(navigate "source" "$HOME")
 
