@@ -317,8 +317,8 @@ All connected drives will appear at the top of the destination list as `🌐 SHA
 Bookmarks are stored as plain text in `~/.mmv_bookmarks`:
 
 ```
-192.168.1.100|HOME|masayuki
-192.168.1.100|USBDISK|masayuki
+192.168.1.100|HOME|username
+192.168.1.100|USBDISK|username
 192.168.1.200|SHARENAME|otheruser
 ```
 
